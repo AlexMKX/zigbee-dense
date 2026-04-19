@@ -1,0 +1,15 @@
+# Local build artefacts
+/tmp-build/
+/tmp-out/
+/zigbee-dense-upstream/
+
+# Editor junk
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python cache (scripts are pure bash, but guard anyway)
+__pycache__/
+*.pyc
