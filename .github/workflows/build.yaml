@@ -176,6 +176,13 @@ jobs:
           name: upstream-src
           path: upstream
 
+      - name: Restore executable bits lost by upload-artifact
+        run: |
+          # actions/upload-artifact strips file permissions; restore what the
+          # upstream build system needs to be executable.
+          chmod +x upstream/tools/create_gbl.py
+          find upstream/tools -name "*.py" -exec chmod +x {} +
+
       - name: Build firmware
         id: build
         run: |
