@@ -99,3 +99,46 @@ jobs:
               echo "build_image=true" >> "$GITHUB_OUTPUT"
               echo "Image missing — build-container will run"
           fi
+
+  build-container:
+    name: Build container image from upstream Dockerfile
+    runs-on: ubuntu-latest
+    needs: [discover, check-container]
+    if: needs.check-container.outputs.build_image == 'true'
+    permissions:
+      packages: write
+    steps:
+      - name: Download upstream source
+        uses: actions/download-artifact@v8
+        with:
+          name: upstream-src
+          path: upstream
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to ghcr
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: upstream
+          file: upstream/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ needs.discover.outputs.image_name }}:${{ needs.discover.outputs.image_tag }}
+          cache-from: type=registry,ref=${{ needs.discover.outputs.image_name }}:cache
+          cache-to: type=registry,ref=${{ needs.discover.outputs.image_name }}:cache,mode=max
+          push: true
