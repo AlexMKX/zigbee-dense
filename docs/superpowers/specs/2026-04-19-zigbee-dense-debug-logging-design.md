@@ -109,7 +109,7 @@ aids; bricking them into tokens would complicate firmware upgrades.
 | 0x0010  | uptime_s               | uint32      | RO     | —       | Seconds since boot (wraps at 2^32 s). |
 | 0x0011  | route_table_fill_pct   | uint8       | RO     | —       | Used entries × 100 / `SL_ZIGBEE_ROUTE_TABLE_SIZE`. |
 | 0x0012  | neighbor_count         | uint8       | RO     | —       | Current entries in neighbor table. |
-| 0x0013  | packet_buffer_free     | uint8       | RO     | —       | `sl_zigbee_get_free_buffers()`. |
+| 0x0013  | buffer_free_bytes      | uint16      | RO     | —       | `sli_legacy_buffer_manager_buffer_bytes_remaining()` — free bytes in the Zigbee packet buffer heap. |
 | 0x0014  | last_incoming_src      | uint16      | RO     | 0xFFFF  | NwkAddr of last APS payload delivered to the app. |
 
 Bitmap bits 0-3 map directly onto
@@ -192,16 +192,16 @@ static void heartbeat_event_handler(sl_zigbee_af_event_t *event)
   // Update RO attrs (write to attribute store so Z2M reads are fresh)
   uint8_t route_pct = route_table_fill_percent();   // iterates route tbl
   uint8_t nbr       = neighbor_table_count();
-  uint8_t bufs      = sl_zigbee_get_free_buffers();
+  uint16_t buf_free = sli_legacy_buffer_manager_buffer_bytes_remaining();
 
-  sl_zigbee_af_write_server_attribute(1, 0xFC00, 0x0010,
-                                      ZCL_UINT32_ATTRIBUTE_TYPE,
-                                      (uint8_t*)&uptime, sizeof(uptime));
+  sl_zigbee_af_write_manufacturer_specific_server_attribute(
+      1, 0xFC00, 0x0010, 0x1002,
+      (uint8_t*)&uptime, ZCL_INT32U_ATTRIBUTE_TYPE);
   /* ... same for 0x0011..0x0014 ... */
 
   if (dbg_groups & (1u << DBG_HB)) {
     dbg_print(DBG_HB, "uptime=%lus rt=%u%% nbr=%u buf=%u lastSrc=0x%04X",
-              uptime, route_pct, nbr, bufs, dbg_last_src);
+              uptime, route_pct, nbr, buf_free, dbg_last_src);
   }
 
   if (dbg_hb_s > 0) {
@@ -298,7 +298,7 @@ exposes: [
   e.numeric('uptime_s', ea.STATE_GET).withUnit('s'),
   e.numeric('route_table_fill_pct', ea.STATE_GET).withUnit('%'),
   e.numeric('neighbor_count', ea.STATE_GET),
-  e.numeric('packet_buffer_free', ea.STATE_GET),
+  e.numeric('buffer_free_bytes', ea.STATE_GET),
   e.numeric('last_incoming_src', ea.STATE_GET),
 ],
 ```
