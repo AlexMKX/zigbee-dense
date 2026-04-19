@@ -1,19 +1,19 @@
-From bc8121362399c48f024f29c37452ca1a723aa318 Mon Sep 17 00:00:00 2001
+From ce4867e005e3f0bb708fb10c1016cd274ecd7f2f Mon Sep 17 00:00:00 2001
 From: zigbee-dense <build@local>
 Date: Sun, 19 Apr 2026 18:07:04 +0300
 Subject: [PATCH] router: add debug_cluster.{h,c} stubs + register in slcp
 
 ---
  src/zigbee_router/debug_cluster.c    | 225 +++++++++++++++++++++++++++
- src/zigbee_router/debug_cluster.h    |  51 ++++++
+ src/zigbee_router/debug_cluster.h    |  50 ++++++
  src/zigbee_router/zigbee_router.slcp |   6 +
- 3 files changed, 282 insertions(+)
+ 3 files changed, 281 insertions(+)
  create mode 100644 src/zigbee_router/debug_cluster.c
  create mode 100644 src/zigbee_router/debug_cluster.h
 
 diff --git a/src/zigbee_router/debug_cluster.c b/src/zigbee_router/debug_cluster.c
 new file mode 100644
-index 0000000..0328cbe
+index 0000000..a5765d5
 --- /dev/null
 +++ b/src/zigbee_router/debug_cluster.c
 @@ -0,0 +1,225 @@
@@ -94,6 +94,7 @@ index 0000000..0328cbe
 +
 +void dbg_print(enum dbg_group group, const char *fmt, ...)
 +{
++  if ((unsigned)group >= (sizeof(s_group_tag) / sizeof(s_group_tag[0]))) return;
 +  if ((s_dbg_groups & (1u << group)) == 0u) return;
 +
 +  uint32_t ms = uptime_ms();
@@ -103,7 +104,7 @@ index 0000000..0328cbe
 +  char buf[192];
 +  int n = snprintf(buf, sizeof(buf), "[%lu.%03lu] [%s] ",
 +                   (unsigned long)sec, (unsigned long)rem, s_group_tag[group]);
-+  if (n < 0 || n >= (int)sizeof(buf)) return;
++  if (n < 0 || n >= (int)sizeof(buf) - 1) return;
 +
 +  va_list ap;
 +  va_start(ap, fmt);
@@ -111,7 +112,6 @@ index 0000000..0328cbe
 +  va_end(ap);
 +
 +  /* Route through the APP print-type; text tag in buf already identifies the group. */
-+  extern void sli_zigbee_debug_print(uint32_t group_type, bool new_line, const char *format, ...);
 +  sli_zigbee_debug_print((uint32_t)SL_ZIGBEE_DEBUG_PRINT_TYPE_APP, true, "%s", buf);
 +}
 +
@@ -244,10 +244,10 @@ index 0000000..0328cbe
 +}
 diff --git a/src/zigbee_router/debug_cluster.h b/src/zigbee_router/debug_cluster.h
 new file mode 100644
-index 0000000..6d94bf4
+index 0000000..47e4083
 --- /dev/null
 +++ b/src/zigbee_router/debug_cluster.h
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,50 @@
 +/***************************************************************************//**
 + * @file debug_cluster.h
 + * @brief Runtime debug logging + manufacturer cluster 0xFC00 glue for
@@ -259,7 +259,6 @@ index 0000000..6d94bf4
 +#ifndef DEBUG_CLUSTER_H
 +#define DEBUG_CLUSTER_H
 +
-+#include <stdarg.h>
 +#include <stdint.h>
 +#include <stdbool.h>
 +
