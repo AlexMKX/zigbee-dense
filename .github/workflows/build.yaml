@@ -199,3 +199,60 @@ jobs:
           path: upstream/outputs/*
           if-no-files-found: error
           compression-level: 9
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [discover, build]
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+          pattern: firmware-*
+
+      - name: Compute sha256sums and prepare body
+        id: body
+        run: |
+          ls -la artifacts/
+          SUMS=$(sha256sum artifacts/*.gbl)
+          TAG="build-$(date -u +%Y%m%d-%H%M%S)"
+          {
+            echo "tag=$TAG"
+            echo 'body<<BODY_EOF'
+            echo "## Build metadata"
+            echo ""
+            echo "- Upstream branch: \`${{ needs.discover.outputs.upstream_branch }}\`"
+            echo "- Upstream SHA: \`${{ needs.discover.outputs.upstream_sha }}\`"
+            echo "- Image: \`${{ needs.discover.outputs.image_name }}:${{ needs.discover.outputs.image_tag }}\`"
+            echo "- Repo SHA: \`${{ github.sha }}\`"
+            echo ""
+            echo "## Artifact checksums"
+            echo ""
+            echo '```'
+            echo "$SUMS"
+            echo '```'
+            echo ""
+            echo "## Flashing (SLZB-06 devices)"
+            echo ""
+            echo "1. Download the \`.gbl\` matching your device model."
+            echo "2. \`POST http://<device-ip>/fileUpload?customName=/fw.bin\` (form field \`update\`)."
+            echo "3. \`GET http://<device-ip>/api2?action=6&zbChipIdx=0&local=1&fwVer=-1&fwType=0&baud=0&fwCh=1\`."
+            echo 'BODY_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.body.outputs.tag }}
+          name: "Build ${{ steps.body.outputs.tag }}"
+          generate_release_notes: false
+          body: ${{ steps.body.outputs.body }}
+          files: |
+            artifacts/*.gbl
