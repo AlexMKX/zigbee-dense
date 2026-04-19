@@ -142,3 +142,60 @@ jobs:
           cache-from: type=registry,ref=${{ needs.discover.outputs.image_name }}:cache
           cache-to: type=registry,ref=${{ needs.discover.outputs.image_name }}:cache,mode=max
           push: true
+
+  build:
+    name: Build firmware (${{ matrix.manifest }})
+    runs-on: ubuntu-latest
+    needs: [discover, check-container, build-container]
+    # Run if check-container succeeded AND (build-container succeeded OR was skipped)
+    if: |
+      always() &&
+      needs.check-container.result == 'success' &&
+      (needs.build-container.result == 'success' || needs.build-container.result == 'skipped')
+    permissions:
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        manifest: ${{ fromJson(needs.discover.outputs.matrix) }}
+    container:
+      image: ${{ needs.discover.outputs.image_name }}:${{ needs.discover.outputs.image_tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root
+    steps:
+      - name: Checkout our repo
+        uses: actions/checkout@v6
+        with:
+          path: ours
+
+      - name: Download upstream source
+        uses: actions/download-artifact@v8
+        with:
+          name: upstream-src
+          path: upstream
+
+      - name: Build firmware
+        id: build
+        run: |
+          cd upstream
+          git config --global --add safe.directory "$PWD"
+          REPO_HASH=$(git -C "$GITHUB_WORKSPACE/ours" rev-parse --short=8 HEAD)
+          /opt/venv/bin/python3 tools/build_project.py \
+              --manifest "$GITHUB_WORKSPACE/ours/${{ matrix.manifest }}" \
+              --build-dir build \
+              --output-dir outputs \
+              --output gbl --output hex --output out \
+              --repo-owner "$GITHUB_REPOSITORY_OWNER" \
+              --repo-hash "$REPO_HASH"
+          OUT_BASE=$(basename -- "$(ls -1 outputs/*.gbl | head -n 1)" .gbl)
+          echo "out_base=$OUT_BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ steps.build.outputs.out_base }}
+          path: upstream/outputs/*
+          if-no-files-found: error
+          compression-level: 9
