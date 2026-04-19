@@ -70,3 +70,32 @@ jobs:
           path: upstream/
           retention-days: 1
           include-hidden-files: true
+
+  check-container:
+    name: Check if container image exists in ghcr
+    runs-on: ubuntu-latest
+    needs: discover
+    permissions:
+      packages: read
+    outputs:
+      build_image: ${{ steps.check.outputs.build_image }}
+    steps:
+      - name: Log in to ghcr (for private repo manifest access)
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Probe image
+        id: check
+        run: |
+          IMAGE="${{ needs.discover.outputs.image_name }}:${{ needs.discover.outputs.image_tag }}"
+          echo "Probing $IMAGE"
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+              echo "build_image=false" >> "$GITHUB_OUTPUT"
+              echo "Image exists — will skip build-container"
+          else
+              echo "build_image=true" >> "$GITHUB_OUTPUT"
+              echo "Image missing — build-container will run"
+          fi
