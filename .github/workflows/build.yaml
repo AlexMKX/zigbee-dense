@@ -1,0 +1,72 @@
+name: Build firmwares
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_REPO: zigbee-dense
+
+jobs:
+  discover:
+    name: Discover — clone upstream, compute image tag, build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image.outputs.tag }}
+      image_name: ${{ steps.image.outputs.name }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      upstream_sha: ${{ steps.upstream.outputs.sha }}
+      upstream_branch: ${{ steps.pin.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read upstream pin
+        id: pin
+        run: |
+          # shellcheck disable=SC1091
+          source ./upstream.conf
+          echo "repo=$UPSTREAM_REPO" >> "$GITHUB_OUTPUT"
+          echo "branch=$UPSTREAM_BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Clone upstream
+        run: |
+          git clone --depth 1 \
+              --branch "${{ steps.pin.outputs.branch }}" \
+              "${{ steps.pin.outputs.repo }}" \
+              upstream
+
+      - name: Compute image tag
+        id: image
+        run: |
+          TAG=$(sha256sum upstream/Dockerfile upstream/requirements.txt \
+              | sha256sum | cut -c-16)
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=${{ env.REGISTRY }}/$OWNER/${{ env.IMAGE_REPO }}" >> "$GITHUB_OUTPUT"
+          echo "Computed image: ${{ env.REGISTRY }}/$OWNER/${{ env.IMAGE_REPO }}:$TAG"
+
+      - name: Record upstream HEAD SHA
+        id: upstream
+        run: |
+          SHA=$(git -C upstream rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Build manifest matrix
+        id: matrix
+        run: |
+          MATRIX=$(find manifests -type f \( -name "*.yaml" -o -name "*.yml" \) \
+              | sort | jq -R -s -c 'split("\n")[:-1]')
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "Matrix: $MATRIX"
+
+      - name: Upload upstream tarball for downstream jobs
+        uses: actions/upload-artifact@v7
+        with:
+          name: upstream-src
+          path: upstream/
+          retention-days: 1
+          include-hidden-files: true
