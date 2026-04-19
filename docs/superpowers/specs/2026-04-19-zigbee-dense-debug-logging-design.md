@@ -375,25 +375,121 @@ first patch; left as a documented fallback.
 - Attribute read race during heartbeat update: ZCL attribute store
   writes are atomic at the API level; no locking needed.
 
+## Build & flash workflow
+
+The development loop for this task is iterative (patch → build → flash →
+observe → adjust). The loop is documented explicitly here because it
+drives the structure of the implementation plan.
+
+### Build: CI only
+
+Every change — patch, manifest edit, converter tweak — is committed to
+`main` and built via GitHub Actions:
+
+```
+gh workflow run build.yaml -R AlexMKX/zigbee-dense \
+  -f manifest=smlight_slzb06mu_dense_zigbee_router
+gh run watch  -R AlexMKX/zigbee-dense
+gh release list -R AlexMKX/zigbee-dense -L 1
+gh release download <tag> -R AlexMKX/zigbee-dense -p '*.gbl' -D /tmp/slzb06mu-gbl/
+```
+
+Rationale: `scripts/build-local.sh` exists but has not been verified
+against the current tree and runs the upstream Docker image (~9 min cold,
+~3 min cached). CI is comparable in wall-clock time, reproducible, and
+the resulting `.gbl` is authoritative (same image host-used for releases).
+Local builds stay available as a fallback if GHA is unreachable.
+
+Typical round-trip: ~4-5 min (push → release asset downloaded).
+
+### Flash: new `scripts/flash-slzb06mu.sh`
+
+Committed to `zigbee-dense/scripts/flash-slzb06mu.sh`. Single arg: path
+to `.gbl`. Environment: `SLZB_HOST` (default `192.168.88.144`),
+`SLZB_FW_CH` (default `1` = `ZB_ROUTER`).
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+GBL="${1:?path to .gbl required}"
+HOST="${SLZB_HOST:-192.168.88.144}"
+FWCH="${SLZB_FW_CH:-1}"
+
+echo "== Upload $GBL to $HOST =="
+curl -fsS -F "update=@${GBL}" \
+  "http://${HOST}/fileUpload?customName=/fw.bin" >/dev/null
+echo "== Trigger flash (fwCh=${FWCH}) =="
+curl -fsS "http://${HOST}/api2?action=6&zbChipIdx=0&local=1&fwVer=-1&fwType=0&baud=0&fwCh=${FWCH}" \
+  >/dev/null
+echo "== Waiting for device to come back =="
+for i in {1..60}; do
+  sleep 5
+  info=$(curl -fsS "http://${HOST}/ha_info" 2>/dev/null || true)
+  if echo "$info" | grep -q '"zb_type":1'; then
+    echo "== Back online as ZB_ROUTER =="; echo "$info" | python3 -m json.tool; exit 0
+  fi
+  echo "  ... still rebooting ($((i*5))s)"
+done
+echo "!! Timeout waiting for device" >&2; exit 1
+```
+
+Invariant: `SLZB_FW_CH=1`. The `fwCh=2` bug (model_id becomes
+`SLZB-06MU` instead of `SLZB-06M`, see session notes 2026-04-18) is
+prevented structurally here.
+
+### Verification: `ha_info` + Z2M device list
+
+After `flash-slzb06mu.sh` returns successfully, the gate criteria are:
+
+1. **Firmware role.** `curl -s http://192.168.88.144/ha_info | jq .Info.zb_type`
+   returns `1` (ZB_ROUTER).
+2. **Device present in Z2M.** Via MQTT on the home HA instance:
+   ```bash
+   ssh root@hassio.h.xxl.cx mosquitto_sub -h core-mosquitto \
+     -t 'zigbee2mqtt/bridge/devices' -C 1 | \
+     jq '.[] | select(.ieee_address == "0x385c040001a7dd93")'
+   ```
+   The record must show `supported: true` and cluster `0xFC00` under
+   `endpoints.1.clusters.input` once our patched firmware is deployed.
+3. **Write round-trip on cluster 0xFC00.** From Z2M:
+   ```bash
+   mosquitto_pub -h core-mosquitto \
+     -t 'zigbee2mqtt/<router>/set' \
+     -m '{"debug_heartbeat": true, "heartbeat_interval_s": 5}'
+   mosquitto_sub -h core-mosquitto -t 'zigbee2mqtt/<router>' -C 3
+   ```
+   The echoed state message must include the new values.
+
+Steps 1-2 confirm the firmware boots and joins. Step 3 confirms the
+debug cluster itself works, independently of whether the UART channel
+does.
+
 ## Testing
 
-- **Build test.** `scripts/build-local.sh smlight_slzb06mu_dense_zigbee_router`
-  succeeds, `.gbl` under size budget.
-- **Boot test.** Flash via existing `/fileUpload` + `/api2?action=6&fwCh=1`
-  flow. Device rejoins the network, `ha_info` shows
-  `zb_type=1` (ZB_ROUTER), Z2M sees the device as `supported: True`.
-- **Cluster presence.** Z2M bind + interview reports cluster `0xFC00`
-  on endpoint 1 with the declared attributes.
-- **Write round-trip.** From Z2M MQTT:
-  `zigbee2mqtt/<router>/set {"debug_groups": 0}` — after completion, a
-  subsequent `{"debug_groups": 127}` should re-enable everything, with
-  the log stream showing the gap.
-- **Heartbeat.** With `heartbeat_interval_s=5` and `debug_groups`
-  including HB, a log line appears every ~5 s.
-- **UART read.** Attempt to open the UART-over-TCP as in the
-  operational procedure; if it works, capture at least one full
-  heartbeat cycle to `/tmp/slzb-debug.log`. Record the procedure in
-  README with exact steps.
+Tests below run in the order listed. The UART step (which depends on
+unresolved Component 5 risks) is the last gate.
+
+- **CI build.** `gh workflow run build.yaml` succeeds, release contains
+  `smlight_slzb06mu_dense_zigbee_router_*.gbl` under the size budget
+  (~250 KiB upper bound).
+- **Boot test.** After `scripts/flash-slzb06mu.sh`, `ha_info` shows
+  `zb_type=1` and the device is pingable. Z2M logs
+  (`/home/alex/Projects/zigbee/45df7312_zigbee2mqtt/zigbee2mqtt/log/`)
+  show it rejoining cleanly, no repeated rejoin loops.
+- **Cluster interview.** Z2M `/bridge/devices` shows cluster `0xFC00` on
+  endpoint 1 with the seven declared attributes. Trigger a re-interview
+  if needed with `zigbee2mqtt/bridge/request/device/interview`.
+- **Write round-trip.** As in the Verification section above.
+- **Heartbeat.** With `heartbeat_interval_s=5` and `debug_heartbeat=true`,
+  polling `uptime_s` twice 10 s apart shows a ~10 s delta. (Confirms the
+  heartbeat event is actually running; independent of UART readability.)
+- **UART read (last, gate for Component 5).** Attempt the procedure in
+  "Component 5: Reading logs". If the TCP bridge yields our log lines,
+  capture at least one full heartbeat cycle to `/tmp/slzb-debug.log` and
+  record exact steps in `zigbee-dense/README.md`. If it does not,
+  document the failure mode and escalate to Component 5 alt (Zigbee-side
+  log dump) as a follow-up task — do NOT block the main deliverable on
+  it.
 
 No automated tests — this is firmware running on real hardware and the
 only end-to-end harness is the live router.
