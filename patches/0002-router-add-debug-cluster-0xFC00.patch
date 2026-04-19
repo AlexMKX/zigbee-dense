@@ -1,57 +1,253 @@
-From 3609549898169fafca470591400caac0882927b1 Mon Sep 17 00:00:00 2001
+From bc8121362399c48f024f29c37452ca1a723aa318 Mon Sep 17 00:00:00 2001
 From: zigbee-dense <build@local>
 Date: Sun, 19 Apr 2026 18:07:04 +0300
 Subject: [PATCH] router: add debug_cluster.{h,c} stubs + register in slcp
 
 ---
- src/zigbee_router/debug_cluster.c    | 29 ++++++++++++++++
- src/zigbee_router/debug_cluster.h    | 50 ++++++++++++++++++++++++++++
- src/zigbee_router/zigbee_router.slcp |  6 ++++
- 3 files changed, 85 insertions(+)
+ src/zigbee_router/debug_cluster.c    | 225 +++++++++++++++++++++++++++
+ src/zigbee_router/debug_cluster.h    |  51 ++++++
+ src/zigbee_router/zigbee_router.slcp |   6 +
+ 3 files changed, 282 insertions(+)
  create mode 100644 src/zigbee_router/debug_cluster.c
  create mode 100644 src/zigbee_router/debug_cluster.h
 
 diff --git a/src/zigbee_router/debug_cluster.c b/src/zigbee_router/debug_cluster.c
 new file mode 100644
-index 0000000..e39669f
+index 0000000..0328cbe
 --- /dev/null
 +++ b/src/zigbee_router/debug_cluster.c
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,225 @@
 +/***************************************************************************//**
 + * @file debug_cluster.c
-+ * @brief Implementation stubs. Functional body lands in Tasks 2-4.
 + ******************************************************************************/
 +#include "debug_cluster.h"
 +
-+void dbg_init(void) { /* filled in Task 3 */ }
++#include <stdarg.h>
++#include <stdio.h>
++#include <string.h>
++
++#include "app/framework/include/af.h"
++#include "app/framework/plugin/debug-print/sl_zigbee_debug_print.h"
++#include "stack/include/stack-info.h"
++#include "buffer_manager/buffer-management.h"
++#include "sl_sleeptimer.h"
++
++/* Compile-time defaults. Mirrors are RAM-only (no NVM3). */
++#define DBG_GROUPS_DEFAULT         0x001Fu   /* stack|core|app|zcl, no route/aps_in/hb */
++#define DBG_HB_INTERVAL_DEFAULT    60u
++#define DBG_HB_INTERVAL_MIN        5u
++#define DBG_HB_INTERVAL_MAX        3600u
++
++#define DBG_ENDPOINT               1
++#define DBG_CLUSTER                0xFC00u
++#define DBG_MFG_CODE               0x1002u
++
++#define DBG_ATTR_GROUPS            0x0000u
++#define DBG_ATTR_HB_INTERVAL       0x0001u
++#define DBG_ATTR_UPTIME_S          0x0010u
++#define DBG_ATTR_ROUTE_FILL_PCT    0x0011u
++#define DBG_ATTR_NEIGHBOR_COUNT    0x0012u
++#define DBG_ATTR_BUFFER_FREE_B     0x0013u
++#define DBG_ATTR_LAST_INCOMING_SRC 0x0014u
++
++static uint16_t s_dbg_groups  = DBG_GROUPS_DEFAULT;
++static uint16_t s_hb_s        = DBG_HB_INTERVAL_DEFAULT;
++static uint16_t s_last_src    = 0xFFFFu;
++static sl_zigbee_af_event_t s_heartbeat_event;
++
++static const char *const s_group_tag[] = {
++  [DBG_STACK]  = "STACK",
++  [DBG_CORE]   = "CORE",
++  [DBG_APP]    = "APP",
++  [DBG_ZCL]    = "ZCL",
++  [DBG_ROUTE]  = "ROUTE",
++  [DBG_APS_IN] = "APS",
++  [DBG_HB]     = "HB",
++};
++
++static uint32_t uptime_ms(void)
++{
++  uint64_t ticks = sl_sleeptimer_get_tick_count64();
++  uint32_t freq  = sl_sleeptimer_get_timer_frequency();
++  if (freq == 0) return 0;
++  return (uint32_t)((ticks * 1000u) / freq);
++}
++
++/* Count route-table entries whose destination is not the UNUSED sentinel 0xFFFF. */
++static uint8_t route_table_fill_percent(void)
++{
++  uint8_t size = sl_zigbee_get_route_table_size();
++  if (size == 0) return 0;
++  uint8_t used = 0;
++  for (uint8_t i = 0; i < size; i++) {
++    sl_zigbee_route_table_entry_t e;
++    if (sl_zigbee_get_route_table_entry(i, &e) == SL_STATUS_OK) {
++      if (e.destination != 0xFFFFu) used++;
++    }
++  }
++  return (uint8_t)((uint16_t)used * 100u / size);
++}
++
++/* ------------------------------------------------------------------ */
++/* Public API                                                          */
++/* ------------------------------------------------------------------ */
 +
 +void dbg_print(enum dbg_group group, const char *fmt, ...)
 +{
-+  (void)group; (void)fmt;
++  if ((s_dbg_groups & (1u << group)) == 0u) return;
++
++  uint32_t ms = uptime_ms();
++  uint32_t sec = ms / 1000u;
++  uint32_t rem = ms % 1000u;
++
++  char buf[192];
++  int n = snprintf(buf, sizeof(buf), "[%lu.%03lu] [%s] ",
++                   (unsigned long)sec, (unsigned long)rem, s_group_tag[group]);
++  if (n < 0 || n >= (int)sizeof(buf)) return;
++
++  va_list ap;
++  va_start(ap, fmt);
++  vsnprintf(buf + n, sizeof(buf) - (size_t)n, fmt, ap);
++  va_end(ap);
++
++  /* Route through the APP print-type; text tag in buf already identifies the group. */
++  extern void sli_zigbee_debug_print(uint32_t group_type, bool new_line, const char *format, ...);
++  sli_zigbee_debug_print((uint32_t)SL_ZIGBEE_DEBUG_PRINT_TYPE_APP, true, "%s", buf);
 +}
 +
-+void dbg_hook_stack_status(uint8_t status) { (void)status; }
++/* ------------------------------------------------------------------ */
++/* Heartbeat                                                          */
++/* ------------------------------------------------------------------ */
++
++static void heartbeat_handler(sl_zigbee_af_event_t *event);
++
++static void heartbeat_update_attrs(void)
++{
++  uint32_t up   = uptime_ms() / 1000u;
++  uint8_t  fill = route_table_fill_percent();
++  uint8_t  nbr  = sl_zigbee_neighbor_count();
++  uint16_t buf_free = sli_legacy_buffer_manager_buffer_bytes_remaining();
++
++  (void)sl_zigbee_af_write_manufacturer_specific_server_attribute(
++      DBG_ENDPOINT, DBG_CLUSTER, DBG_ATTR_UPTIME_S, DBG_MFG_CODE,
++      (uint8_t *)&up, ZCL_INT32U_ATTRIBUTE_TYPE);
++  (void)sl_zigbee_af_write_manufacturer_specific_server_attribute(
++      DBG_ENDPOINT, DBG_CLUSTER, DBG_ATTR_ROUTE_FILL_PCT, DBG_MFG_CODE,
++      (uint8_t *)&fill, ZCL_INT8U_ATTRIBUTE_TYPE);
++  (void)sl_zigbee_af_write_manufacturer_specific_server_attribute(
++      DBG_ENDPOINT, DBG_CLUSTER, DBG_ATTR_NEIGHBOR_COUNT, DBG_MFG_CODE,
++      (uint8_t *)&nbr, ZCL_INT8U_ATTRIBUTE_TYPE);
++  (void)sl_zigbee_af_write_manufacturer_specific_server_attribute(
++      DBG_ENDPOINT, DBG_CLUSTER, DBG_ATTR_BUFFER_FREE_B, DBG_MFG_CODE,
++      (uint8_t *)&buf_free, ZCL_INT16U_ATTRIBUTE_TYPE);
++  (void)sl_zigbee_af_write_manufacturer_specific_server_attribute(
++      DBG_ENDPOINT, DBG_CLUSTER, DBG_ATTR_LAST_INCOMING_SRC, DBG_MFG_CODE,
++      (uint8_t *)&s_last_src, ZCL_INT16U_ATTRIBUTE_TYPE);
++
++  dbg_print(DBG_HB,
++            "up=%lus nbr=%u rtFill=%u%% bufFree=%uB lastSrc=0x%04X",
++            (unsigned long)up, (unsigned)nbr, (unsigned)fill,
++            (unsigned)buf_free, (unsigned)s_last_src);
++}
++
++static void heartbeat_handler(sl_zigbee_af_event_t *event)
++{
++  heartbeat_update_attrs();
++  if (s_hb_s > 0u) {
++    sl_zigbee_af_event_set_delay_ms(event, (uint32_t)s_hb_s * 1000u);
++  }
++}
++
++/* ------------------------------------------------------------------ */
++/* Hook bodies                                                        */
++/* ------------------------------------------------------------------ */
++
++void dbg_init(void)
++{
++  sl_zigbee_af_event_init(&s_heartbeat_event, heartbeat_handler);
++  if (s_hb_s > 0u) {
++    sl_zigbee_af_event_set_delay_ms(&s_heartbeat_event,
++                                    (uint32_t)s_hb_s * 1000u);
++  }
++  dbg_print(DBG_APP, "debug_cluster ready, groups=0x%04X hb=%us",
++            (unsigned)s_dbg_groups, (unsigned)s_hb_s);
++}
++
++void dbg_hook_stack_status(uint8_t status)
++{
++  const char *name;
++  switch (status) {
++    case 0x90u: name = "NETWORK_UP";        break;
++    case 0x91u: name = "NETWORK_DOWN";      break;
++    case 0x92u: name = "JOIN_FAILED";       break;
++    case 0x93u: name = "MOVE_FAILED";       break;
++    case 0x94u: name = "CANT_JOIN";         break;
++    case 0x95u: name = "NODE_ID_CHANGED";   break;
++    case 0x96u: name = "PAN_ID_CHANGED";    break;
++    case 0x97u: name = "CHANNEL_CHANGED";   break;
++    case 0x98u: name = "NO_BEACONS";        break;
++    case 0xA2u: name = "NETWORK_OPENED";    break;
++    case 0xA3u: name = "NETWORK_CLOSED";    break;
++    default:    name = "STATUS"; break;
++  }
++  dbg_print(DBG_ROUTE, "stack_status: %s (0x%02X)", name, (unsigned)status);
++}
 +
 +void dbg_hook_incoming_message(uint16_t src_short,
 +                               uint16_t profile_id,
 +                               uint16_t cluster_id,
 +                               uint16_t payload_len)
 +{
-+  (void)src_short; (void)profile_id; (void)cluster_id; (void)payload_len;
++  s_last_src = src_short;
++  dbg_print(DBG_APS_IN,
++            "APS in: src=0x%04X prof=0x%04X clus=0x%04X len=%u",
++            (unsigned)src_short, (unsigned)profile_id,
++            (unsigned)cluster_id, (unsigned)payload_len);
 +}
 +
 +void dbg_hook_post_attribute_change(uint8_t endpoint,
 +                                    uint16_t cluster,
 +                                    uint16_t attr_id)
 +{
-+  (void)endpoint; (void)cluster; (void)attr_id;
++  if (endpoint != DBG_ENDPOINT || cluster != DBG_CLUSTER) return;
++
++  if (attr_id == DBG_ATTR_GROUPS) {
++    uint8_t buf[2]; uint16_t new_groups = 0;
++    if (sl_zigbee_af_read_manufacturer_specific_server_attribute(
++            endpoint, cluster, attr_id, DBG_MFG_CODE,
++            buf, sizeof(buf)) == SL_ZIGBEE_ZCL_STATUS_SUCCESS) {
++      new_groups = (uint16_t)buf[0] | ((uint16_t)buf[1] << 8);
++      new_groups &= DBG_ALL_MASK;
++      s_dbg_groups = new_groups;
++      dbg_print(DBG_APP, "debug_groups -> 0x%04X", (unsigned)new_groups);
++    }
++  } else if (attr_id == DBG_ATTR_HB_INTERVAL) {
++    uint8_t buf[2]; uint16_t v = 0;
++    if (sl_zigbee_af_read_manufacturer_specific_server_attribute(
++            endpoint, cluster, attr_id, DBG_MFG_CODE,
++            buf, sizeof(buf)) == SL_ZIGBEE_ZCL_STATUS_SUCCESS) {
++      v = (uint16_t)buf[0] | ((uint16_t)buf[1] << 8);
++      if (v > 0u && v < DBG_HB_INTERVAL_MIN)  v = DBG_HB_INTERVAL_MIN;
++      else if (v > DBG_HB_INTERVAL_MAX)       v = DBG_HB_INTERVAL_MAX;
++      (void)sl_zigbee_af_write_manufacturer_specific_server_attribute(
++          endpoint, cluster, attr_id, DBG_MFG_CODE,
++          (uint8_t *)&v, ZCL_INT16U_ATTRIBUTE_TYPE);
++      s_hb_s = v;
++      if (v == 0u) {
++        sl_zigbee_af_event_set_inactive(&s_heartbeat_event);
++      } else {
++        sl_zigbee_af_event_set_delay_ms(&s_heartbeat_event, (uint32_t)v * 1000u);
++      }
++      dbg_print(DBG_APP, "heartbeat_interval_s -> %us", (unsigned)v);
++    }
++  }
 +}
 diff --git a/src/zigbee_router/debug_cluster.h b/src/zigbee_router/debug_cluster.h
 new file mode 100644
-index 0000000..47e4083
+index 0000000..6d94bf4
 --- /dev/null
 +++ b/src/zigbee_router/debug_cluster.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,51 @@
 +/***************************************************************************//**
 + * @file debug_cluster.h
 + * @brief Runtime debug logging + manufacturer cluster 0xFC00 glue for
@@ -63,6 +259,7 @@ index 0000000..47e4083
 +#ifndef DEBUG_CLUSTER_H
 +#define DEBUG_CLUSTER_H
 +
++#include <stdarg.h>
 +#include <stdint.h>
 +#include <stdbool.h>
 +
