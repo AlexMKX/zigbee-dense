@@ -1,16 +1,158 @@
-From ce4867e005e3f0bb708fb10c1016cd274ecd7f2f Mon Sep 17 00:00:00 2001
+From 43cbc1b77b6a011ea9c33be3e221cc6214b06bbc Mon Sep 17 00:00:00 2001
 From: zigbee-dense <build@local>
 Date: Sun, 19 Apr 2026 18:07:04 +0300
 Subject: [PATCH] router: add debug_cluster.{h,c} stubs + register in slcp
 
 ---
- src/zigbee_router/debug_cluster.c    | 225 +++++++++++++++++++++++++++
- src/zigbee_router/debug_cluster.h    |  50 ++++++
- src/zigbee_router/zigbee_router.slcp |   6 +
- 3 files changed, 281 insertions(+)
+ src/zigbee_router/config/zcl/zcl_config.zap | 125 ++++++++++-
+ src/zigbee_router/debug_cluster.c           | 225 ++++++++++++++++++++
+ src/zigbee_router/debug_cluster.h           |  50 +++++
+ src/zigbee_router/zigbee_router.slcp        |   6 +
+ 4 files changed, 405 insertions(+), 1 deletion(-)
  create mode 100644 src/zigbee_router/debug_cluster.c
  create mode 100644 src/zigbee_router/debug_cluster.h
 
+diff --git a/src/zigbee_router/config/zcl/zcl_config.zap b/src/zigbee_router/config/zcl/zcl_config.zap
+index 28df11b..3979669 100644
+--- a/src/zigbee_router/config/zcl/zcl_config.zap
++++ b/src/zigbee_router/config/zcl/zcl_config.zap
+@@ -516,6 +516,129 @@
+               "reportableChange": 0
+             }
+           ]
++        },
++        {
++          "name": "Manufacturer Specific",
++          "code": 64512,
++          "mfgCode": 4098,
++          "define": "SLZB_DEBUG_CLUSTER",
++          "side": "server",
++          "enabled": 1,
++          "attributes": [
++            {
++              "name": "debug_groups",
++              "code": 0,
++              "mfgCode": 4098,
++              "side": "server",
++              "type": "bitmap16",
++              "included": 1,
++              "storageOption": "RAM",
++              "singleton": 1,
++              "bounded": 0,
++              "defaultValue": "0x001F",
++              "reportable": 0,
++              "minInterval": 0,
++              "maxInterval": 0,
++              "reportableChange": 0
++            },
++            {
++              "name": "heartbeat_interval_s",
++              "code": 1,
++              "mfgCode": 4098,
++              "side": "server",
++              "type": "int16u",
++              "included": 1,
++              "storageOption": "RAM",
++              "singleton": 1,
++              "bounded": 0,
++              "defaultValue": "60",
++              "reportable": 0,
++              "minInterval": 0,
++              "maxInterval": 0,
++              "reportableChange": 0
++            },
++            {
++              "name": "uptime_s",
++              "code": 16,
++              "mfgCode": 4098,
++              "side": "server",
++              "type": "int32u",
++              "included": 1,
++              "storageOption": "RAM",
++              "singleton": 1,
++              "bounded": 0,
++              "defaultValue": "0",
++              "reportable": 0,
++              "minInterval": 0,
++              "maxInterval": 0,
++              "reportableChange": 0
++            },
++            {
++              "name": "route_table_fill_pct",
++              "code": 17,
++              "mfgCode": 4098,
++              "side": "server",
++              "type": "int8u",
++              "included": 1,
++              "storageOption": "RAM",
++              "singleton": 1,
++              "bounded": 0,
++              "defaultValue": "0",
++              "reportable": 0,
++              "minInterval": 0,
++              "maxInterval": 0,
++              "reportableChange": 0
++            },
++            {
++              "name": "neighbor_count",
++              "code": 18,
++              "mfgCode": 4098,
++              "side": "server",
++              "type": "int8u",
++              "included": 1,
++              "storageOption": "RAM",
++              "singleton": 1,
++              "bounded": 0,
++              "defaultValue": "0",
++              "reportable": 0,
++              "minInterval": 0,
++              "maxInterval": 0,
++              "reportableChange": 0
++            },
++            {
++              "name": "buffer_free_bytes",
++              "code": 19,
++              "mfgCode": 4098,
++              "side": "server",
++              "type": "int16u",
++              "included": 1,
++              "storageOption": "RAM",
++              "singleton": 1,
++              "bounded": 0,
++              "defaultValue": "0",
++              "reportable": 0,
++              "minInterval": 0,
++              "maxInterval": 0,
++              "reportableChange": 0
++            },
++            {
++              "name": "last_incoming_src",
++              "code": 20,
++              "mfgCode": 4098,
++              "side": "server",
++              "type": "int16u",
++              "included": 1,
++              "storageOption": "RAM",
++              "singleton": 1,
++              "bounded": 0,
++              "defaultValue": "0xFFFF",
++              "reportable": 0,
++              "minInterval": 0,
++              "maxInterval": 0,
++              "reportableChange": 0
++            }
++          ],
++          "commands": []
+         }
+       ]
+     },
+@@ -739,4 +862,4 @@
+       "parentEndpointIdentifier": null
+     }
+   ]
+-}
+\ No newline at end of file
++}
 diff --git a/src/zigbee_router/debug_cluster.c b/src/zigbee_router/debug_cluster.c
 new file mode 100644
 index 0000000..a5765d5
