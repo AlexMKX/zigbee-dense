@@ -211,6 +211,9 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs: [discover, build]
+    # 'build' uses always() so it can run when build-container is skipped;
+    # we must mirror that here or GitHub will skip this job too.
+    if: always() && needs.build.result == 'success'
     permissions:
       contents: write
     concurrency:
