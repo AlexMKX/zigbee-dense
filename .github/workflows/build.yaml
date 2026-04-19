@@ -39,6 +39,14 @@ jobs:
               "${{ steps.pin.outputs.repo }}" \
               upstream
 
+      - name: Apply patches to upstream
+        run: |
+          shopt -s nullglob
+          for p in patches/*.patch; do
+            echo "Applying $p"
+            git -C upstream apply --verbose "$GITHUB_WORKSPACE/$p"
+          done
+
       - name: Compute image tag
         id: image
         run: |
