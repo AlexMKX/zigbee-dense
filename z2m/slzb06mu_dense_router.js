@@ -13,7 +13,7 @@ const exposes = require('zigbee-herdsman-converters/lib/exposes');
 const ea = exposes.access;
 
 const CLUSTER = 0xFC00;
-const MFG = 0x1002;
+const MFG = 0xFFF1;
 
 const DBG_BITS = {
   stack: 1 << 0, core: 1 << 1, app: 1 << 2, zcl: 1 << 3,
@@ -112,8 +112,15 @@ module.exports = [{
     exposes.numeric('last_incoming_src',    ea.STATE_GET),
   ],
   configure: async (device, coordinatorEndpoint, logger) => {
+    // Read RW control attributes individually (manufacturer-specific cluster
+    // does not support bulk ReadAttributes in a single request on this firmware).
     const ep = device.getEndpoint(1);
-    await ep.read(CLUSTER, [0x0000, 0x0001, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014],
-                  { manufacturerCode: MFG });
+    for (const attr of [0x0000, 0x0001]) {
+      try {
+        await ep.read(CLUSTER, [attr], { manufacturerCode: MFG });
+      } catch (e) {
+        logger.warning(`Failed to read attr 0x${attr.toString(16)}: ${e.message}`);
+      }
+    }
   },
 }];
