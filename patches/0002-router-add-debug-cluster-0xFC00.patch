@@ -1,4 +1,4 @@
-From 43cbc1b77b6a011ea9c33be3e221cc6214b06bbc Mon Sep 17 00:00:00 2001
+From 1710cfeceb37fea4371bbfeaf238019b18712f35 Mon Sep 17 00:00:00 2001
 From: zigbee-dense <build@local>
 Date: Sun, 19 Apr 2026 18:07:04 +0300
 Subject: [PATCH] router: add debug_cluster.{h,c} stubs + register in slcp
@@ -6,9 +6,9 @@ Subject: [PATCH] router: add debug_cluster.{h,c} stubs + register in slcp
 ---
  src/zigbee_router/config/zcl/zcl_config.zap | 125 ++++++++++-
  src/zigbee_router/debug_cluster.c           | 225 ++++++++++++++++++++
- src/zigbee_router/debug_cluster.h           |  50 +++++
+ src/zigbee_router/debug_cluster.h           |  49 +++++
  src/zigbee_router/zigbee_router.slcp        |   6 +
- 4 files changed, 405 insertions(+), 1 deletion(-)
+ 4 files changed, 404 insertions(+), 1 deletion(-)
  create mode 100644 src/zigbee_router/debug_cluster.c
  create mode 100644 src/zigbee_router/debug_cluster.h
 
@@ -386,10 +386,10 @@ index 0000000..a5765d5
 +}
 diff --git a/src/zigbee_router/debug_cluster.h b/src/zigbee_router/debug_cluster.h
 new file mode 100644
-index 0000000..47e4083
+index 0000000..9ad002c
 --- /dev/null
 +++ b/src/zigbee_router/debug_cluster.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,49 @@
 +/***************************************************************************//**
 + * @file debug_cluster.h
 + * @brief Runtime debug logging + manufacturer cluster 0xFC00 glue for
@@ -402,7 +402,6 @@ index 0000000..47e4083
 +#define DEBUG_CLUSTER_H
 +
 +#include <stdint.h>
-+#include <stdbool.h>
 +
 +#ifdef __cplusplus
 +extern "C" {
@@ -426,7 +425,7 @@ index 0000000..47e4083
 +/** Print one line if the group is enabled. Prefix: "[uptime_s.ms] [TAG] ". */
 +void dbg_print(enum dbg_group group, const char *fmt, ...);
 +
-+/* Hooks — thin adapters called from app.c. All are no-ops until Task 3. */
++/* Hooks — thin adapters called from app.c. */
 +void dbg_hook_stack_status(uint8_t status);
 +void dbg_hook_incoming_message(uint16_t src_short,
 +                               uint16_t profile_id,
