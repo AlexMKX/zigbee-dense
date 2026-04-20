@@ -1,0 +1,67 @@
+From f7ad38ae3920430489b0057a48f4e9294471d661 Mon Sep 17 00:00:00 2001
+From: zd <build@local>
+Date: Sun, 19 Apr 2026 18:57:30 +0300
+Subject: [PATCH 2/2] router: wire dbg_init + hooks into app.c
+
+---
+ src/zigbee_router/app.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/src/zigbee_router/app.c b/src/zigbee_router/app.c
+index 783cfd6..dc16c35 100644
+--- a/src/zigbee_router/app.c
++++ b/src/zigbee_router/app.c
+@@ -19,6 +19,7 @@
+ #ifdef SL_COMPONENT_CATALOG_PRESENT
+ #include "sl_component_catalog.h"
+ #endif
++#include "debug_cluster.h"
+ 
+ #ifdef SL_CATALOG_ZIGBEE_NETWORK_TEST_PRESENT
+ #include "network_test_config.h"
+@@ -128,6 +129,7 @@ static void button_event_handler(sl_zigbee_af_event_t *event)
+  */
+ void sl_zigbee_af_stack_status_cb(sl_status_t status)
+ {
++  dbg_hook_stack_status((uint8_t)status);
+   if (status == SL_STATUS_NETWORK_DOWN) {
+     led_turn_off(COMMISSIONING_STATUS_LED);
+     sl_zigbee_af_event_set_delay_ms(&commissioning_event, NWK_STEERING_COOLDOWN_MS);
+@@ -151,6 +153,7 @@ void sl_zigbee_af_main_init_cb(void)
+   #endif // SL_CATALOG_SIMPLE_BUTTON_PRESENT
+ 
+   sl_zigbee_af_event_set_active(&commissioning_event);
++  dbg_init();
+ }
+ 
+ /** @brief Complete network steering.
+@@ -246,4 +249,26 @@ void sl_button_on_change(const sl_button_t *handle)
+ }
+ #endif // SL_CATALOG_SIMPLE_BUTTON_PRESENT
+ 
++bool sl_zigbee_af_pre_message_received_cb(sl_zigbee_af_incoming_message_t *incomingMessage)
++{
++  dbg_hook_incoming_message(incomingMessage->source,
++                            incomingMessage->apsFrame->profileId,
++                            incomingMessage->apsFrame->clusterId,
++                            incomingMessage->msgLen);
++  return false;
++}
++
++void sl_zigbee_af_post_attribute_change_cb(uint8_t endpoint,
++                                           sl_zigbee_af_cluster_id_t clusterId,
++                                           sl_zigbee_af_attribute_id_t attributeId,
++                                           uint8_t mask,
++                                           uint16_t manufacturerCode,
++                                           uint8_t type,
++                                           uint8_t size,
++                                           uint8_t *value)
++{
++  (void)mask; (void)manufacturerCode; (void)type; (void)size; (void)value;
++  dbg_hook_post_attribute_change(endpoint, clusterId, attributeId);
++}
++
+ #endif //#if (LARGE_NETWORK_TESTING == 0)
+-- 
+2.51.0
+
