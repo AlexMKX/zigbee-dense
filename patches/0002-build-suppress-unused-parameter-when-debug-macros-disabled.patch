@@ -1,0 +1,25 @@
+From ca889332d81ee975548945e3d5b8698af5140587 Mon Sep 17 00:00:00 2001
+From: Alex MKX <github-alex@xxl.cx>
+Date: Mon, 20 Apr 2026 14:25:52 +0300
+Subject: [PATCH] build: suppress unused-parameter warnings when debug macros
+ are disabled
+
+---
+ tools/build_project.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tools/build_project.py b/tools/build_project.py
+index 042f332..7a840d3 100755
+--- a/tools/build_project.py
++++ b/tools/build_project.py
+@@ -917,6 +917,7 @@ def main():
+         "-Werror",
+         "-Wno-error=maybe-uninitialized",  # Linking fails due to a few SDK bugs
+         "-Wno-error=unused-function",  # 'mbedtls_ssl_get_hostname_pointer' defined but not used
++        "-Wno-error=unused-parameter",  # SDK callbacks have unused params when debug macros are disabled
+     ]
+     build_flags["CXX_FLAGS"] = build_flags["C_FLAGS"]
+ 
+-- 
+2.51.0
+
