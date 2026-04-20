@@ -5,8 +5,8 @@
 # config, clock, TX power, or dense-router tuning in the production
 # manifest, mirror the same change here.
 #
-# The only intentional diff is the debug group c_defines at the bottom
-# of this file.
+# The only intentional diff: production sets all four SL_ZIGBEE_DEBUG_*_GROUP_ENABLED
+# to 0 (strips print strings from binary); this file explicitly sets them to 1.
 name: SMLIGHT SLZB-06MU Dense Zigbee Router — DEBUG build (UART tracing enabled)
 device: EFR32MG21A020F768IM32
 base_project: src/zigbee_router
@@ -143,15 +143,10 @@ c_defines:
   SL_ZIGBEE_APS_DUPLICATE_REJECTION_MAX_ENTRIES: 64
 
   # === Debug print compile-time enables (this is the DEBUG build) ===
-  # STACK: network / routing / trust-center events.
+  # SDK 2025.12.2 defaults all four groups to ENABLED=1. Explicitly restating
+  # them here makes the intent visible and guards against future SDK changes
+  # that might flip the defaults.
   SL_ZIGBEE_DEBUG_STACK_GROUP_ENABLED: 1
-  SL_ZIGBEE_DEBUG_STACK_GROUP_RUNTIME_DEFAULT: 1
-  # CORE: component-level diagnostics.
   SL_ZIGBEE_DEBUG_CORE_GROUP_ENABLED: 1
-  SL_ZIGBEE_DEBUG_CORE_GROUP_RUNTIME_DEFAULT: 1
-  # APP: application-layer prints (e.g. button handler).
   SL_ZIGBEE_DEBUG_APP_GROUP_ENABLED: 1
-  SL_ZIGBEE_DEBUG_APP_GROUP_RUNTIME_DEFAULT: 1
-  # ZCL: ZCL command tracing.
   SL_ZIGBEE_DEBUG_ZCL_GROUP_ENABLED: 1
-  SL_ZIGBEE_DEBUG_ZCL_GROUP_RUNTIME_DEFAULT: 1

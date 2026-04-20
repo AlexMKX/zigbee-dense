@@ -133,3 +133,12 @@ c_defines:
   # xg24 default here.
   SL_ZIGBEE_APS_DUPLICATE_REJECTION_MAX_ENTRIES: 64
 
+  # === Disable debug print groups at compile time (production build) ===
+  # SDK 2025.12.2 defaults all four groups to ENABLED=1, which embeds debug
+  # print strings in the binary. Explicitly set to 0 so the compiler elides
+  # all print strings, shrinking the production GBL by ~1-4 KiB.
+  SL_ZIGBEE_DEBUG_STACK_GROUP_ENABLED: 0
+  SL_ZIGBEE_DEBUG_CORE_GROUP_ENABLED: 0
+  SL_ZIGBEE_DEBUG_APP_GROUP_ENABLED: 0
+  SL_ZIGBEE_DEBUG_ZCL_GROUP_ENABLED: 0
+
