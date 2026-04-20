@@ -1,0 +1,157 @@
+# DEBUG BUILD — DO NOT EDIT INDEPENDENTLY.
+#
+# This file is a copy of smlight_slzb06mu_dense_zigbee_router.yaml
+# with debug-print compile-time groups enabled. When you change pin
+# config, clock, TX power, or dense-router tuning in the production
+# manifest, mirror the same change here.
+#
+# The only intentional diff is the debug group c_defines at the bottom
+# of this file.
+name: SMLIGHT SLZB-06MU Dense Zigbee Router — DEBUG build (UART tracing enabled)
+device: EFR32MG21A020F768IM32
+base_project: src/zigbee_router
+filename: "{manifest_name}_{sdk_version}_{fw_version}_{baudrate}_{fw_variant}"
+sdk: "simplicity_sdk:2025.12.2"
+toolchain: "12.2.1.20221205"
+
+gbl:
+  fw_type: zigbee_router
+  baudrate: 115200
+  fw_variant: sw_flow
+
+# This file is a "dense" sibling of `smlight_slzb06m_zigbee_router.yaml`.
+# Pin/clock/UART/LED are byte-for-byte identical to the stock SMLIGHT
+# SLZB-06M router manifest. The only differences are the `slcp_defines` and
+# the extra `c_defines` block at the bottom that widen Zigbee tables for
+# routers serving very dense meshes (~150 devices).
+#
+# IMPORTANT: stack table sizes (ROUTE_TABLE_SIZE, DISCOVERY_TABLE_SIZE) MUST
+# go in `slcp_defines`. Putting them in `configuration:` does not stick on
+# this codebase — see commit 96aa4d6 in the NCP history
+# ("revert unsupported neighbor table size override").
+
+add_components:
+  # Status LED on PC0 (same as stock SLZB-06M router manifest)
+  - id: simple_led
+    instance:
+      - led0
+
+slcp_defines:
+  # Transit-side widening — biggest single win for a 150-device mesh.
+  SL_ZIGBEE_ROUTE_TABLE_SIZE: 80            # upstream MG21 default: 16
+  SL_ZIGBEE_DISCOVERY_TABLE_SIZE: 24        # upstream MG21 default: 16
+
+# === Concentrator / source routing suppression ===
+# The stock src/zigbee_router project is derived from the Silabs Z3Router
+# sample and ships with SL_ZIGBEE_AF_PLUGIN_CONCENTRATOR enabled as a
+# HIGH_RAM_CONCENTRATOR. A concentrator periodically broadcasts MTORR
+# (Many-to-One Route Request) and every device in the mesh answers with a
+# Route Record. This is useful for the *traffic-originating* node (the Z2M
+# coordinator), but we have two concentrators fighting for route state and
+# doubling the route-maintenance broadcast load — a pure relay router like
+# ours never sends app-layer unicasts, so the source route table it builds
+# is dead weight.
+#
+# Fix: flip DEFAULT_ROUTER_BEHAVIOR to NONE. When the stack comes up as a
+# router with NONE behavior, sl_zigbee_af_concentrator_stack_status_cb
+# skips the sl_zigbee_set_concentrator() call entirely — no MTORR, no
+# route-record storm. The concentrator plugin stays linked (app.c still
+# compiles and the runtime API remains available via
+# sl_zigbee_af_concentrator_change_router_behavior()), but it is dormant.
+#
+# Timing values (MIN/MAX/THRESHOLD) are bumped to their safety-clamped
+# maxima so that *if* something flips behavior to FULL at runtime, the
+# storm is still minimal. Hard schema limits from the component config
+# wizard (simplicity_sdk 2025.12.2,
+# protocol/zigbee/app/framework/plugin/concentrator/config/concentrator-config.h):
+#   MIN_TIME_BETWEEN_BROADCASTS_SECONDS: <1-60>
+#   MAX_TIME_BETWEEN_BROADCASTS_SECONDS: <30-300>
+#   ROUTE_ERROR_THRESHOLD:              <1-100>
+#   DELIVERY_FAILURE_THRESHOLD:         <1-100>
+# Values outside these ranges fail the slc build validation.
+configuration:
+  # Primary switch: do not start the MTORR cycle on network up.
+  SL_ZIGBEE_AF_PLUGIN_CONCENTRATOR_DEFAULT_ROUTER_BEHAVIOR: SL_ZIGBEE_AF_PLUGIN_CONCENTRATOR_ROUTER_BEHAVIOR_NONE
+  # Safety nets (only matter if runtime flips behavior back to FULL).
+  SL_ZIGBEE_AF_PLUGIN_CONCENTRATOR_MIN_TIME_BETWEEN_BROADCASTS_SECONDS: 60
+  SL_ZIGBEE_AF_PLUGIN_CONCENTRATOR_MAX_TIME_BETWEEN_BROADCASTS_SECONDS: 300
+  SL_ZIGBEE_AF_PLUGIN_CONCENTRATOR_ROUTE_ERROR_THRESHOLD: 100
+  SL_ZIGBEE_AF_PLUGIN_CONCENTRATOR_DELIVERY_FAILURE_THRESHOLD: 100
+
+  # === Radio TX power ===
+  # EFR32MG21A020 has an integrated PA rated for up to +20 dBm. The base
+  # project pins this at 19 dBm; go to the chip maximum. This value is
+  # used in two places:
+  #   1. sl_zigbee_set_radio_power() just before the active scan during
+  #      network steering (beacon request power).
+  #   2. networkParams.radioTxPower passed to sl_zigbee_join_network(),
+  #      which stores it in the NIB (NVM3) and becomes the steady-state
+  #      TX power for every subsequent frame until a rejoin.
+  # Schema limit from component config wizard (simplicity_sdk 2025.12.2,
+  # protocol/zigbee/app/framework/plugin/network-steering/config/network-steering-config.h):
+  #   SL_ZIGBEE_AF_PLUGIN_NETWORK_STEERING_RADIO_TX_POWER: <-8..20>
+  # NOTE: a firmware flash alone does not change the live radio power —
+  # the stack reads radioTxPower from the NIB on startup. A rejoin after
+  # flash re-reads the config default and writes it back to the NIB.
+  SL_ZIGBEE_AF_PLUGIN_NETWORK_STEERING_RADIO_TX_POWER: 20
+
+c_defines:
+  # === Pin/clock/UART/LED (identical to upstream smlight_slzb06m_zigbee_router.yaml) ===
+  SL_IOSTREAM_USART_VCOM_BAUDRATE: 115200
+  SL_IOSTREAM_USART_VCOM_FLOW_CONTROL_TYPE: uartFlowControlSoftware
+
+  SL_IOSTREAM_USART_VCOM_PERIPHERAL: USART0
+  SL_IOSTREAM_USART_VCOM_PERIPHERAL_NO: 0
+
+  SL_IOSTREAM_USART_VCOM_TX_PORT: SL_GPIO_PORT_B
+  SL_IOSTREAM_USART_VCOM_TX_PIN: 1
+
+  SL_IOSTREAM_USART_VCOM_RX_PORT: SL_GPIO_PORT_B
+  SL_IOSTREAM_USART_VCOM_RX_PIN: 0
+
+  SL_IOSTREAM_USART_VCOM_CTS_PORT: 0
+  SL_IOSTREAM_USART_VCOM_CTS_PIN: 0
+
+  SL_IOSTREAM_USART_VCOM_RTS_PORT: 0
+  SL_IOSTREAM_USART_VCOM_RTS_PIN: 0
+
+  SL_SIMPLE_LED_LED0_POLARITY: SL_SIMPLE_LED_POLARITY_ACTIVE_HIGH
+  SL_SIMPLE_LED_LED0_PORT: SL_GPIO_PORT_C
+  SL_SIMPLE_LED_LED0_PIN: 0
+
+  SL_CLOCK_MANAGER_HFXO_CTUNE: 80
+
+  SL_RAIL_UTIL_RSSI_OFFSET: -11
+
+  # === Dense-router deltas ===
+  # Larger packet buffer heap. NOT `HUGE` — that is sized for MG24/MG26
+  # (1 MiB flash, 256 KiB RAM). LARGE is the most we can afford on MG21
+  # (768 KiB flash, 96 KiB RAM).
+  SL_ZIGBEE_PACKET_BUFFER_HEAP_SIZE: SL_ZIGBEE_LARGE_PACKET_BUFFER_HEAP
+
+  # Bigger broadcast tracking table — Tuya devices flood broadcasts.
+  # upstream MG21 default: 30
+  SL_ZIGBEE_BROADCAST_TABLE_SIZE: 35
+
+  # Allow several unique APS link keys (per-child) instead of a single one.
+  # upstream MG21 default: 1
+  SL_ZIGBEE_KEY_TABLE_SIZE: 8
+
+  # APS duplicate-rejection table is unset for xg21 in upstream router.slcp
+  # but is 64 for xg24/xg26. Tuya retries badly — we want at least the
+  # xg24 default here.
+  SL_ZIGBEE_APS_DUPLICATE_REJECTION_MAX_ENTRIES: 64
+
+  # === Debug print compile-time enables (this is the DEBUG build) ===
+  # STACK: network / routing / trust-center events.
+  SL_ZIGBEE_DEBUG_STACK_GROUP_ENABLED: 1
+  SL_ZIGBEE_DEBUG_STACK_GROUP_RUNTIME_DEFAULT: 1
+  # CORE: component-level diagnostics.
+  SL_ZIGBEE_DEBUG_CORE_GROUP_ENABLED: 1
+  SL_ZIGBEE_DEBUG_CORE_GROUP_RUNTIME_DEFAULT: 1
+  # APP: application-layer prints (e.g. button handler).
+  SL_ZIGBEE_DEBUG_APP_GROUP_ENABLED: 1
+  SL_ZIGBEE_DEBUG_APP_GROUP_RUNTIME_DEFAULT: 1
+  # ZCL: ZCL command tracing.
+  SL_ZIGBEE_DEBUG_ZCL_GROUP_ENABLED: 1
+  SL_ZIGBEE_DEBUG_ZCL_GROUP_RUNTIME_DEFAULT: 1
