@@ -67,3 +67,31 @@ carry src/ patches.
 
 MIT. Upstream toolchain and Silabs SDK are licensed by their respective
 vendors.
+
+
+## Debug builds (SLZB-06MU)
+
+Each release publishes two GBLs for the SLZB-06MU router:
+
+| GBL suffix                                           | Debug print |
+|------------------------------------------------------|-------------|
+| `smlight_slzb06mu_dense_zigbee_router_*.gbl`         | off         |
+| `smlight_slzb06mu_dense_zigbee_router_debug_*.gbl`   | on          |
+
+The debug build enables compile-time debug print groups STACK, CORE, APP
+and ZCL, so the EFR32 emits diagnostic lines on USART0 (PB1 TX, PB0 RX).
+
+### Reading the debug stream
+
+SLZB-OS only exposes the EFR32 UART on TCP 6638 when the device is in
+Zigbee2MQTT-TCP coordinator mode (`coord_mode=1`). To capture logs:
+
+1. In SLZB-OS UI → Zigbee → Working mode → switch to
+   "Zigbee2MQTT / TCP socket". Reboot when prompted.
+2. `nc <device-ip> 6638 | strings` — text lines will stream as the
+   firmware emits them.
+3. When done, switch the device back to "Zigbee Router" mode so it
+   rejoins the mesh as a router.
+
+Important: while in TCP coordinator mode the device is **not** acting as
+a router. Switch back as soon as the capture session is done.
